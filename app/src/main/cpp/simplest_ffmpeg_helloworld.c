@@ -9,8 +9,11 @@
 #ifdef ANDROID
 #include <jni.h>
 #include <android/log.h>
+#include <android/native_window_jni.h>
+#include <android/native_window.h>
 #include <libavutil/imgutils.h>
 #include <libswscale/swscale.h>
+#include <unistd.h>
 
 #define LOGE(format, ...)  __android_log_print(ANDROID_LOG_ERROR, "(>_<)", format, ##__VA_ARGS__)
 #else
@@ -236,4 +239,100 @@ JNIEXPORT jint JNICALL Java_win_intheworld_ffmpegandroidsample_MainActivity_deco
     avformat_close_input(&pFormatCtx);
 
     return 0;
+}
+
+JNIEXPORT void JNICALL
+Java_win_intheworld_ffmpegandroidsample_MainActivity_render(JNIEnv *env, jobject obj,
+                jstring inputStr_, jobject surface) {
+    const char *inputPath = (*env)->GetStringUTFChars(env, inputStr_, JNI_FALSE);
+    AVFormatContext *avFormatContext = avformat_alloc_context();
+    int error;
+    char buf[] = "";
+    if ((error = avformat_open_input(&avFormatContext, inputPath, NULL, NULL)) < 0) {
+        av_strerror(error, buf, 1024);
+        LOGE("%s", inputPath);
+        LOGE("Could't open file %s: %d(%s)", inputPath, error, buf);
+        return;
+    }
+
+    if (avformat_find_stream_info(avFormatContext, NULL) < 0) {
+        LOGE("%s", "Could't find stream.");
+        return;
+    }
+
+    int video_index = -1;
+    for (int i = 0; i < avFormatContext->nb_streams; i++) {
+        if (avFormatContext->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO) {
+            video_index = i;
+            break;
+        }
+    }
+
+    if (video_index < 0) {
+        LOGE("Can not find video stream.");
+        return;
+    }
+
+    AVCodecContext *avCodecContext = avFormatContext->streams[video_index]->codec;
+
+    AVCodec *avCodec = avcodec_find_decoder(avCodecContext->codec_id);
+
+    if (avcodec_open2(avCodecContext, avCodec, NULL) < 0) {
+        LOGE("open failed.");
+        return;
+    }
+
+    AVPacket *packet = (AVPacket *) av_malloc(sizeof(AVPacket));
+    av_init_packet(packet);
+
+    AVFrame *frame = av_frame_alloc();
+    AVFrame *rgb_frame = av_frame_alloc();
+
+    uint8_t *out_buffer = (uint8_t *)av_malloc(avpicture_get_size(AV_PIX_FMT_RGBA, avCodecContext->width, avCodecContext->height));
+
+    avpicture_fill((AVPicture *)rgb_frame, out_buffer, AV_PIX_FMT_RGBA, avCodecContext->width, avCodecContext->height);
+
+    struct SwsContext* swsContext = sws_getContext(avCodecContext->width, avCodecContext->height, avCodecContext->pix_fmt,
+                                        avCodecContext->width, avCodecContext->height, AV_PIX_FMT_RGBA,
+                                        SWS_BICUBIC, NULL, NULL, NULL);
+
+    ANativeWindow *nativeWindow = ANativeWindow_fromSurface(env, surface);
+    if (nativeWindow==0) {
+        LOGE("Can not find nativeWindow.");
+        return;
+    }
+
+    ANativeWindow_Buffer native_outBuffer;
+    int frameCount;
+    int h = 0;
+
+    while (av_read_frame(avFormatContext, packet) >= 0) {
+        if (packet->stream_index == video_index) {
+            avcodec_decode_video2(avCodecContext, frame, &frameCount, packet);
+            if (frameCount) {
+                ANativeWindow_setBuffersGeometry(nativeWindow, avCodecContext->width, avCodecContext->height, WINDOW_FORMAT_RGBA_8888);
+                ANativeWindow_lock(nativeWindow, &native_outBuffer, NULL);
+
+                sws_scale(swsContext, (const uint8_t *const *)frame->data, frame->linesize, 0,
+                        frame->height, rgb_frame->data,
+                        rgb_frame->linesize);
+                uint8_t *dst = (uint8_t *)native_outBuffer.bits;
+                int destStride = native_outBuffer.stride * 4;
+                uint8_t *src = rgb_frame->data[0];
+                int srcStride = rgb_frame->linesize[0];
+                for (int i = 0; i < avCodecContext->height; ++i) {
+                    memcpy(dst + i*destStride, src + i * srcStride, srcStride);
+                }
+                ANativeWindow_unlockAndPost(nativeWindow);
+                usleep(1000 * 16);
+            }
+        }
+        av_free_packet(packet);
+    }
+    ANativeWindow_release(nativeWindow);
+    av_frame_free(&frame);
+    av_frame_free(&rgb_frame);
+    avcodec_close(avCodecContext);
+    avformat_free_context(avFormatContext);
+    (*env)->ReleaseStringUTFChars(env, inputStr_, inputPath);
 }

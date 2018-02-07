@@ -68,4 +68,4 @@ include_directories(src/main/cpp/include)
 #target_include_directories(native-lib PRIVATE libs/include)
 
 target_link_libraries( native-lib swresample-2 avcodec-57 avfilter-6 swscale-4 avformat-57 avutil-55
-                       ${log-lib} )
+                       ${log-lib} android )

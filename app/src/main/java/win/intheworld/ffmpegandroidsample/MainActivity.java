@@ -1,17 +1,20 @@
 package win.intheworld.ffmpegandroidsample;
 
+import android.app.Activity;
 import android.os.Environment;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.text.method.ScrollingMovementMethod;
 import android.util.Log;
+import android.view.Surface;
+import android.view.SurfaceView;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
 
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -53,6 +56,25 @@ public class MainActivity extends AppCompatActivity {
 
             }
         });
+
+        final SurfaceView surfaceView = (SurfaceView) findViewById(R.id.surfaceView);
+        Button btn_play = (Button) findViewById(R.id.btn_play);
+        btn_play.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                String folderurl= Environment.getExternalStorageDirectory().getPath();
+                String urltext_input= et_fileName.getText().toString();
+                final String inputurl=folderurl+"/"+urltext_input;
+
+                new Thread(new Runnable() {
+                    @Override
+                    public void run() {
+                        render(inputurl, surfaceView.getHolder().getSurface());
+                    }
+                }).run();
+
+            }
+        });
     }
 
 
@@ -60,6 +82,8 @@ public class MainActivity extends AppCompatActivity {
     public native String avcodecinfo();
 
     public native int decode(String inputUrl, String outputUrl);
+
+    public native void render(String inputUrl, Surface surface);
 
     static{
         System.loadLibrary("avutil-55");
